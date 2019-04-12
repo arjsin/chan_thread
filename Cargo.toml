@@ -1,0 +1,21 @@
+[package]
+name = "chan_thread"
+version = "0.0.1"
+authors = ["arjun <arj1singh@gmail.com>"]
+license = "MIT/Apache-2.0"
+repository = "https://github.com/arjsin/chan_thread"
+edition = "2018"
+
+[dependencies]
+futures-preview = "=0.3.0-alpha.14"
+crossbeam-channel = "0.3"
+
+[dev-dependencies]
+criterion = "0.2"
+fut-old = { package = "futures", version = "0.1"}
+fut-old-threadpool = { package = "futures-threadpool", version = "0.1" }
+fut-old-spawn = { package = "futures-spawn", version = "0.1" }
+
+[[bench]]
+name = "future_thread"
+harness = false
