@@ -23,7 +23,7 @@ pub struct FutureThread<S: Send, R: Send> {
 }
 
 impl<S: Send + 'static, R: Send + 'static> FutureThread<S, R> {
-    pub fn new<F>(closure: F) -> FutureThread<S, R>
+    pub fn new<F>(closure: F) -> Self
     where
         F: FnMut(S) -> R + Send + 'static,
     {
