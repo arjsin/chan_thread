@@ -17,9 +17,11 @@ where
 }
 
 /// Creates a thread to repeatedly spawn future on it
-pub struct FutureThread<S: Send, R: Send> {
-    thread_state: Option<thread::JoinHandle<()>>,
-    sender: Option<channel::Sender<(S, oneshot::Sender<R>)>>,
+pub struct FutureThread<S: Send, R: Send>(Option<Inner<S, R>>);
+
+struct Inner<S: Send, R: Send> {
+    thread: thread::JoinHandle<()>,
+    sender: channel::Sender<(S, oneshot::Sender<R>)>,
 }
 
 impl<S: Send + 'static, R: Send + 'static> FutureThread<S, R> {
@@ -31,16 +33,13 @@ impl<S: Send + 'static, R: Send + 'static> FutureThread<S, R> {
         let (sender, receiver) = channel::bounded::<(S, oneshot::Sender<R>)>(1);
 
         // spawn thread with crossbeam receiver
-        let thread_state = Some(thread::spawn(move || work(receiver, closure)));
-        FutureThread {
-            thread_state,
-            sender: Some(sender),
-        }
+        let thread = thread::spawn(move || work(receiver, closure));
+        FutureThread(Some(Inner { thread, sender }))
     }
 
     pub fn call<'a>(&'a self, parameter: S) -> impl Future<Output = Option<R>> + 'a {
         let (sender, receiver) = oneshot::channel();
-        match self.sender.as_ref().unwrap().send((parameter, sender)) {
+        match self.0.as_ref().unwrap().sender.send((parameter, sender)) {
             Ok(()) => Either::A(receiver.map(Result::ok)),
             Err(_) => Either::B(future::ready(None)), // TODO: Add strategy to recover thread panics
         }
@@ -49,8 +48,9 @@ impl<S: Send + 'static, R: Send + 'static> FutureThread<S, R> {
 
 impl<S: Send, R: Send> Drop for FutureThread<S, R> {
     fn drop(&mut self) {
-        drop(self.sender.take());
-        self.thread_state.take().map(thread::JoinHandle::join);
+        let Inner { thread, sender } = self.0.take().unwrap();
+        drop(sender);
+        thread.join().unwrap();
     }
 }
 
