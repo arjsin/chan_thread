@@ -1,5 +1,6 @@
 use crate::unblock_poll_fn;
 use futures::{channel::mpsc, executor::block_on, prelude::*};
+use log::error;
 use std::{
     pin::Pin,
     task::{Poll, Context},
@@ -73,9 +74,14 @@ impl<T> Stream for StreamThread<T> {
 
 impl<T> Drop for StreamThread<T> {
     fn drop(&mut self) {
-        if let Some(Inner { thread, receiver }) = self.0.take() {
-            drop(receiver);
-            thread.join().unwrap();
+        match self.0.take() {
+            Some(Inner { thread, receiver }) => {
+                drop(receiver);
+                thread.join().unwrap_or_else(|_| {
+                    error!("BUG: StreamThread's thread unable to join. Possible Thread panic!");
+                });
+            }
+            _ => unreachable!("BUG: StreamThread dropping in unhandled state"),
         }
     }
 }

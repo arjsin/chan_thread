@@ -1,6 +1,7 @@
 use crate::either::Either;
 use crossbeam_channel as channel;
 use futures::{channel::oneshot, prelude::*};
+use log::error;
 use std::thread;
 
 #[inline]
@@ -48,9 +49,15 @@ impl<S: Send + 'static, R: Send + 'static> FutureThread<S, R> {
 
 impl<S: Send, R: Send> Drop for FutureThread<S, R> {
     fn drop(&mut self) {
-        let Inner { thread, sender } = self.0.take().unwrap();
-        drop(sender);
-        thread.join().unwrap();
+        match self.0.take() {
+            Some(Inner { thread, sender }) => {
+                drop(sender);
+                thread.join().unwrap_or_else(|_| {
+                    error!("BUG: StreamThread's thread unable to join. Possible Thread panic!")
+                });
+            }
+            _ => unreachable!("BUG: StreamThread dropping in unhandled state"),
+        }
     }
 }
 
