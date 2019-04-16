@@ -88,7 +88,7 @@ impl<T> Future for FutureThreadFuture<T> {
     fn poll(mut self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {
         match *self {
             FutureThreadFuture::SendError => Poll::Ready(None),
-            FutureThreadFuture::Receiving(ref mut r) => Pin::new(r).poll(context).map(|x| x.ok()),
+            FutureThreadFuture::Receiving(ref mut r) => Pin::new(r).poll(context).map(Result::ok),
         }
     }
 }
