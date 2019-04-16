@@ -1,5 +1,4 @@
 #![feature(futures_api)]
-mod either;
 mod future_thread;
 mod stream_thread;
 mod unblock_poll_fn;

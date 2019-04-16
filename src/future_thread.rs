@@ -1,8 +1,11 @@
-use crate::either::Either;
 use crossbeam_channel as channel;
 use futures::{channel::oneshot, prelude::*};
 use log::error;
-use std::thread;
+use std::{
+    pin::Pin,
+    task::{Poll, Context},
+    thread,
+};
 
 #[inline]
 fn work<F, S, R>(receiver: channel::Receiver<(S, oneshot::Sender<R>)>, mut closure: F)
@@ -39,11 +42,9 @@ impl<S: Send + 'static, R: Send + 'static> FutureThread<S, R> {
     }
 
     pub fn call<'a>(&'a self, parameter: S) -> impl Future<Output = Option<R>> + 'a {
-        let (sender, receiver) = oneshot::channel();
-        match self.0.as_ref().unwrap().sender.send((parameter, sender)) {
-            Ok(()) => Either::A(receiver.map(Result::ok)),
-            Err(_) => Either::B(future::ready(None)), // TODO: Add strategy to recover thread panics
-        }
+        let (remote_sender, receiver) = oneshot::channel();
+        let sender = &self.0.as_ref().unwrap().sender;
+        FutureThreadFuture::new(sender, (parameter, remote_sender), receiver) // TODO: Add strategy to recover thread panics
     }
 }
 
@@ -57,6 +58,37 @@ impl<S: Send, R: Send> Drop for FutureThread<S, R> {
                 });
             }
             _ => unreachable!("BUG: StreamThread dropping in unhandled state"),
+        }
+    }
+}
+
+enum FutureThreadFuture<T> {
+    SendError,
+    Receiving(oneshot::Receiver<T>),
+}
+
+impl<T> Unpin for FutureThreadFuture<T> {}
+
+impl<T> FutureThreadFuture<T> {
+    fn new<S>(
+        sender: &channel::Sender<(S, oneshot::Sender<T>)>,
+        value: (S, oneshot::Sender<T>),
+        receiver: oneshot::Receiver<T>,
+    ) -> Self {
+        match sender.send(value) {
+            Ok(()) => FutureThreadFuture::Receiving(receiver),
+            Err(_) => FutureThreadFuture::SendError,
+        }
+    }
+}
+
+impl<T> Future for FutureThreadFuture<T> {
+    type Output = Option<T>;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context) -> Poll<Self::Output> {
+        match *self {
+            FutureThreadFuture::SendError => Poll::Ready(None),
+            FutureThreadFuture::Receiving(ref mut r) => Pin::new(r).poll(context).map(|x| x.ok()),
         }
     }
 }
