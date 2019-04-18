@@ -3,7 +3,7 @@ use futures::{channel::mpsc, executor::block_on, prelude::*};
 use log::error;
 use std::{
     pin::Pin,
-    task::{Poll, Context},
+    task::{Context, Poll},
     thread,
 };
 
@@ -36,8 +36,6 @@ fn work<F1, F2, S, R>(
 }
 
 pub struct StreamThread<T>(Option<Inner<T>>);
-
-impl<T> Unpin for StreamThread<T> {}
 
 struct Inner<T> {
     thread: thread::JoinHandle<()>,

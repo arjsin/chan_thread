@@ -3,7 +3,7 @@ use futures::{channel::oneshot, prelude::*};
 use log::error;
 use std::{
     pin::Pin,
-    task::{Poll, Context},
+    task::{Context, Poll},
     thread,
 };
 
@@ -66,8 +66,6 @@ enum FutureThreadFuture<T> {
     SendError,
     Receiving(oneshot::Receiver<T>),
 }
-
-impl<T> Unpin for FutureThreadFuture<T> {}
 
 impl<T> FutureThreadFuture<T> {
     fn new<S>(

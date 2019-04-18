@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{Poll, Context};
+use std::task::{Context, Poll};
 
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled"]

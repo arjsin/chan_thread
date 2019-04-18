@@ -39,8 +39,6 @@ impl From<SendError> for SinkThreadError {
 /// Creates a thread to repeatedly receive value
 pub struct SinkThread<S: Send>(Option<Inner<S>>);
 
-impl<S: Send> Unpin for SinkThread<S> {}
-
 struct Inner<S: Send> {
     thread: thread::JoinHandle<()>,
     sender: mpsc::Sender<S>,
@@ -60,7 +58,7 @@ impl<S: Send + 'static> SinkThread<S> {
     }
 }
 
-impl<S: Send + Unpin> Sink<S> for SinkThread<S> {
+impl<S: Send> Sink<S> for SinkThread<S> {
     type SinkError = SinkThreadError;
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
         match self.0 {
@@ -116,8 +114,8 @@ impl<S: Send> Drop for SinkThread<S> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use futures::executor::block_on;
     use crossbeam_channel as channel;
+    use futures::executor::block_on;
 
     #[test]
     fn smoke() {
