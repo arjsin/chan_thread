@@ -11,9 +11,9 @@ use std::{
 };
 
 #[inline]
-fn work<I, F, P, S>(mut receiver: mpsc::Receiver<S>, mut init: I, mut closure: F)
+fn work<I, F, P, S>(mut receiver: mpsc::Receiver<S>, init: I, mut closure: F)
 where
-    I: FnMut() -> P + Send + 'static,
+    I: FnOnce() -> P + Send + 'static,
     F: FnMut(&mut P, S) + Send + 'static,
 {
     let mut p = init();
@@ -49,7 +49,7 @@ struct Inner<S: Send> {
 impl<S: Send + 'static> SinkThread<S> {
     pub fn new<I, F, P>(init: I, closure: F) -> Self
     where
-        I: FnMut() -> P + Send + 'static,
+        I: FnOnce() -> P + Send + 'static,
         F: FnMut(&mut P, S) + Send + 'static,
     {
         // channel of closure and 'sender of futures oneshot'
