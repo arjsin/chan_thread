@@ -11,12 +11,14 @@ use std::{
 };
 
 #[inline]
-fn work<F, S>(mut receiver: mpsc::Receiver<S>, mut closure: F)
+fn work<I, F, P, S>(mut receiver: mpsc::Receiver<S>, mut init: I, mut closure: F)
 where
-    F: FnMut(S) + Send + 'static,
+    I: FnMut() -> P + Send + 'static,
+    F: FnMut(&mut P, S) + Send + 'static,
 {
+    let mut p = init();
     while let Some(v) = block_on(receiver.next()) {
-        closure(v);
+        closure(&mut p, v);
     }
 }
 
@@ -45,15 +47,16 @@ struct Inner<S: Send> {
 }
 
 impl<S: Send + 'static> SinkThread<S> {
-    pub fn new<F>(closure: F) -> Self
+    pub fn new<I, F, P>(init: I, closure: F) -> Self
     where
-        F: FnMut(S) + Send + 'static,
+        I: FnMut() -> P + Send + 'static,
+        F: FnMut(&mut P, S) + Send + 'static,
     {
         // channel of closure and 'sender of futures oneshot'
         let (sender, receiver) = mpsc::channel::<S>(1);
 
         // spawn thread with crossbeam receiver
-        let thread = thread::spawn(move || work(receiver, closure));
+        let thread = thread::spawn(move || work(receiver, init, closure));
         SinkThread(Some(Inner { thread, sender }))
     }
 }
@@ -120,10 +123,10 @@ mod test {
     #[test]
     fn smoke() {
         let (sender, receiver) = channel::bounded(1);
-        let mut sink_thread = SinkThread::new(move |x| sender.send(x).unwrap());
+        let mut sink_thread = SinkThread::new(|| 1, move |&mut a, x| sender.send(a + x).unwrap());
         block_on(sink_thread.send(1)).unwrap();
         block_on(sink_thread.send(2)).unwrap();
-        assert_eq!(receiver.recv(), Ok(1));
         assert_eq!(receiver.recv(), Ok(2));
+        assert_eq!(receiver.recv(), Ok(3));
     }
 }
