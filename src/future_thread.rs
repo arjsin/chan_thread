@@ -41,7 +41,7 @@ impl<S: Send + 'static, R: Send + 'static> FutureThread<S, R> {
         FutureThread(Some(Inner { thread, sender }))
     }
 
-    pub fn call<'a>(&'a self, parameter: S) -> impl Future<Output = Option<R>> + 'a {
+    pub fn call(&self, parameter: S) -> FutureThreadFuture<R> {
         let (remote_sender, receiver) = oneshot::channel();
         let sender = &self.0.as_ref().unwrap().sender;
         FutureThreadFuture::new(sender, (parameter, remote_sender), receiver) // TODO: Add strategy to recover thread panics
@@ -62,7 +62,7 @@ impl<S: Send, R: Send> Drop for FutureThread<S, R> {
     }
 }
 
-enum FutureThreadFuture<T> {
+pub enum FutureThreadFuture<T> {
     SendError,
     Receiving(oneshot::Receiver<T>),
 }
