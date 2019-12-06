@@ -62,8 +62,8 @@ impl<S: Send + 'static> SinkThread<S> {
 }
 
 impl<S: Send> Sink<S> for SinkThread<S> {
-    type SinkError = SinkThreadError;
-    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
+    type Error = SinkThreadError;
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         match self.0 {
             Some(Inner { ref mut sender, .. }) => {
                 Pin::new(sender).poll_ready(cx).map_err(Into::into)
@@ -72,7 +72,7 @@ impl<S: Send> Sink<S> for SinkThread<S> {
         }
     }
 
-    fn start_send(mut self: Pin<&mut Self>, item: S) -> Result<(), Self::SinkError> {
+    fn start_send(mut self: Pin<&mut Self>, item: S) -> Result<(), Self::Error> {
         match self.0 {
             Some(Inner { ref mut sender, .. }) => {
                 Pin::new(sender).start_send(item).map_err(Into::into)
@@ -81,7 +81,7 @@ impl<S: Send> Sink<S> for SinkThread<S> {
         }
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         match self.0 {
             Some(Inner { ref mut sender, .. }) => {
                 Pin::new(sender).poll_flush(cx).map_err(Into::into)
@@ -90,7 +90,7 @@ impl<S: Send> Sink<S> for SinkThread<S> {
         }
     }
 
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::SinkError>> {
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         match self.0 {
             Some(Inner { ref mut sender, .. }) => {
                 Pin::new(sender).poll_close(cx).map_err(Into::into)
