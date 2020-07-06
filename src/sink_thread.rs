@@ -3,9 +3,9 @@ use futures::{
     executor::block_on,
     prelude::*,
 };
-use log::error;
 use std::{
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     thread,
 };
@@ -39,10 +39,9 @@ impl From<SendError> for SinkThreadError {
 }
 
 /// Creates a thread to repeatedly receive value
-pub struct SinkThread<S: Send>(Option<Inner<S>>);
-
-struct Inner<S: Send> {
-    thread: thread::JoinHandle<()>,
+#[derive(Clone)]
+pub struct SinkThread<S: Send> {
+    thread: Option<Arc<thread::JoinHandle<()>>>,
     sender: mpsc::Sender<S>,
 }
 
@@ -56,61 +55,55 @@ impl<S: Send + 'static> SinkThread<S> {
         let (sender, receiver) = mpsc::channel::<S>(1);
 
         // spawn thread with crossbeam receiver
-        let thread = thread::spawn(move || work(receiver, init, closure));
-        SinkThread(Some(Inner { thread, sender }))
+        let thread = Some(Arc::new(thread::spawn(move || {
+            work(receiver, init, closure)
+        })));
+        SinkThread { thread, sender }
     }
 }
 
 impl<S: Send> Sink<S> for SinkThread<S> {
     type Error = SinkThreadError;
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
-        match self.0 {
-            Some(Inner { ref mut sender, .. }) => {
-                Pin::new(sender).poll_ready(cx).map_err(Into::into)
-            }
-            None => Poll::Ready(Err(SinkThreadError::Disconnected)),
-        }
+        Pin::new(&mut self.sender)
+            .poll_ready(cx)
+            .map_err(Into::into)
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: S) -> Result<(), Self::Error> {
-        match self.0 {
-            Some(Inner { ref mut sender, .. }) => {
-                Pin::new(sender).start_send(item).map_err(Into::into)
-            }
-            None => Err(SinkThreadError::Disconnected),
-        }
+        Pin::new(&mut self.sender)
+            .start_send(item)
+            .map_err(Into::into)
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
-        match self.0 {
-            Some(Inner { ref mut sender, .. }) => {
-                Pin::new(sender).poll_flush(cx).map_err(Into::into)
-            }
-            None => Poll::Ready(Err(SinkThreadError::Disconnected)),
-        }
+        Pin::new(&mut self.sender)
+            .poll_flush(cx)
+            .map_err(Into::into)
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
-        match self.0 {
-            Some(Inner { ref mut sender, .. }) => {
-                Pin::new(sender).poll_close(cx).map_err(Into::into)
-            }
-            None => Poll::Ready(Err(SinkThreadError::Disconnected)),
-        }
+        Pin::new(&mut self.sender)
+            .poll_close(cx)
+            .map_err(Into::into)
     }
 }
 
 impl<S: Send> Drop for SinkThread<S> {
     fn drop(&mut self) {
-        match self.0.take() {
-            Some(Inner { thread, sender }) => {
-                drop(sender);
-                thread.join().unwrap_or_else(|_| {
-                    error!("BUG: StreamThread's thread unable to join. Possible Thread panic!")
-                });
+        self.thread = self.thread.take().and_then(|thread| {
+            let thread = Arc::try_unwrap(thread);
+            match thread {
+                Ok(thread) => {
+                    self.sender.disconnect();
+                    thread
+                        .join()
+                        .expect("unable to join thread; expected thread panic");
+                    None
+                }
+                Err(thread) => Some(thread),
             }
-            _ => unreachable!("BUG: StreamThread dropping in unhandled state"),
-        }
+        });
     }
 }
 
@@ -124,7 +117,8 @@ mod test {
     fn smoke() {
         let (sender, receiver) = channel::bounded(1);
         let mut sink_thread = SinkThread::new(|| 1, move |&mut a, x| sender.send(a + x).unwrap());
-        block_on(sink_thread.send(1)).unwrap();
+        let mut sink_thread2 = sink_thread.clone();
+        block_on(sink_thread2.send(1)).unwrap();
         block_on(sink_thread.send(2)).unwrap();
         assert_eq!(receiver.recv(), Ok(2));
         assert_eq!(receiver.recv(), Ok(3));
