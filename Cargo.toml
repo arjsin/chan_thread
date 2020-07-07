@@ -8,11 +8,11 @@ edition = "2018"
 
 [dependencies]
 futures = "0.3"
-crossbeam-channel = "0.3"
+crossbeam-channel = "0.4"
 log = "0.4"
 
 [dev-dependencies]
-criterion = "0.2"
+criterion = "0.3"
 fut-old = { package = "futures", version = "0.1"}
 fut-old-threadpool = { package = "futures-threadpool", version = "0.1" }
 fut-old-spawn = { package = "futures-spawn", version = "0.1" }
