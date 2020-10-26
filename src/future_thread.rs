@@ -20,7 +20,7 @@ where
     }
 }
 
-/// Creates a thread to repeatedly spawn future on it
+/// Creates a thread to repeatedly spawn closures on it
 pub struct FutureThread<S: Send, R: Send>(Option<Inner<S, R>>);
 
 struct Inner<S: Send, R: Send> {

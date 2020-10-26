@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate criterion;
 
-use chan_thread::FutureThread;
+use chan_thread::{FutureThread, FutureThread2};
 use criterion::black_box;
 use criterion::Criterion;
 use futures::executor::block_on;
@@ -26,5 +26,14 @@ fn old_add(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, future_add, old_add);
+fn future2_add(c: &mut Criterion) {
+    c.bench_function("future2 add", |b| {
+        let x = black_box(1);
+        let y = black_box(2);
+        let mut fut_thread = FutureThread2::new();
+        b.iter(move || block_on(fut_thread.spawn(move || x * x + y * y)))
+    });
+}
+
+criterion_group!(benches, future_add, old_add, future2_add);
 criterion_main!(benches);

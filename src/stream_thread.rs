@@ -22,9 +22,7 @@ fn work<F1, F2, S, R>(
     loop {
         // check if sender is ready
         let v = match block_on(unblock_poll_fn(|w| sender.poll_ready(w))) {
-            Poll::Ready(Ok(())) => {
-                busy_task(&mut initial).and_then(|v| sender.try_send(v).ok())
-            }
+            Poll::Ready(Ok(())) => busy_task(&mut initial).and_then(|v| sender.try_send(v).ok()),
             Poll::Ready(Err(_)) => break,
             Poll::Pending => idle_task(&mut initial),
         };
