@@ -62,7 +62,7 @@ impl FutureThread {
     pub async fn spawn<A, R>(&mut self, closure: A) -> Result<R, FutureThreadError>
     where
         A: FnOnce() -> R + Send + 'static,
-        R: Send + std::fmt::Debug + 'static,
+        R: Send + 'static,
     {
         let (sender, receiver) = oneshot::channel();
         let c = || {
@@ -106,22 +106,27 @@ impl FutureThread {
     pub fn transform<A, P, R>(
         &self,
         closure: A,
-    ) -> TransformFuture<impl FnOnce(P, oneshot::Sender<R>) + Send + Clone, P, R>
+    ) -> TransformFuture<impl FnOnce(Option<P>) + Send + Clone, P, R>
     where
         A: FnOnce(P) -> R + Send + Clone + Unpin + 'static,
         P: Send,
         R: Send,
     {
         let sender = self.0.as_ref().unwrap().sender.clone();
-        let closure = move |param: P, sender: oneshot::Sender<R>| {
-            let res = closure(param);
-            if sender.send(res).is_err() {
-                error!(
+        let (mut return_sender, return_receiver) = mpsc::channel(1);
+        let closure = move |param: Option<P>| {
+            if let Some(param) = param {
+                let res = closure(param);
+                if block_on(return_sender.send(res)).is_err() {
+                    error!(
                     "BUG: Receiver dropped, error sending response from transform of StreamThread"
                 );
+                }
+            } else {
+                return_sender.close_channel();
             }
         };
-        TransformFuture::new(closure, sender)
+        TransformFuture::new(sender, return_receiver, closure)
     }
 }
 
@@ -173,9 +178,11 @@ mod test {
         let fut = async {
             let fut_thread = FutureThread::new();
             let (tx, rx) = fut_thread.transform(|param| param * param).split();
-            stream.map(Ok).forward(tx).await.unwrap();
-            let res = rx.collect::<Vec<_>>().await;
-            assert_eq!(res, vec![9, 25, 36, 49, 81]);
+            let fut1 = stream.map(Ok).forward(tx);
+            let fut2 = rx.collect::<Vec<_>>();
+            let (res1, res2) = future::join(fut1, fut2).await;
+            assert_eq!(res1, Ok(()));
+            assert_eq!(res2, vec![9, 25, 36, 49, 81]);
         };
         block_on(fut);
     }
