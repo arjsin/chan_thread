@@ -8,7 +8,7 @@ use futures::{
     prelude::*,
 };
 use log::error;
-use std::thread;
+use std::{sync::Arc, thread};
 pub use transform_future::TransformFuture;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,10 +35,9 @@ fn work(mut receiver: mpsc::Receiver<Box<dyn FnOnce() + Send>>) {
     }
 }
 
-pub struct FutureThread(Option<Inner>);
-
-struct Inner {
-    thread: thread::JoinHandle<()>,
+#[derive(Clone)]
+pub struct FutureThread {
+    thread: Option<Arc<thread::JoinHandle<()>>>,
     sender: mpsc::Sender<Box<dyn FnOnce() + Send>>,
 }
 
@@ -52,11 +51,14 @@ impl FutureThread {
     pub fn new() -> Self {
         let (sender, receiver) = mpsc::channel::<Box<dyn FnOnce() + Send>>(1);
 
-        // spawn thread with crossbeam receiver
+        // spawn thread with receiver
         let thread = thread::spawn(move || {
             work(receiver);
         });
-        FutureThread(Some(Inner { thread, sender }))
+        FutureThread {
+            thread: Some(Arc::new(thread)),
+            sender,
+        }
     }
 
     pub async fn spawn<A, R>(&mut self, closure: A) -> Result<R, FutureThreadError>
@@ -71,7 +73,7 @@ impl FutureThread {
                 error!("BUG: Receiver dropped, error sending response from spawn of StreamThread");
             }
         };
-        let sender = &mut self.0.as_mut().unwrap().sender;
+        let sender = &mut self.sender;
         let resp = match sender.send(Box::new(c)).await {
             Ok(()) => receiver
                 .await
@@ -83,8 +85,8 @@ impl FutureThread {
 }
 
 impl FutureThread {
-    pub fn with_closure<A, P, R>(
-        &mut self,
+    pub fn into_call_future<A, P, R>(
+        self,
         mut closure: A,
     ) -> CallFuture<impl FnOnce(P, oneshot::Sender<R>) + Send + Clone, P, R>
     where
@@ -92,19 +94,17 @@ impl FutureThread {
         P: Send,
         R: Send,
     {
-        let sender = self.0.as_ref().unwrap().sender.clone();
-
         let c = move |param: P, sender: oneshot::Sender<R>| {
             let res = closure(param);
             if sender.send(res).is_err() {
                 error!("BUG: Receiver dropped, error sending response from call of StreamThread");
             }
         };
-        CallFuture::new(sender, c)
+        CallFuture::new(self, c)
     }
 
-    pub fn transform<A, P, R>(
-        &self,
+    pub fn into_transform<A, P, R>(
+        self,
         closure: A,
     ) -> TransformFuture<impl FnOnce(Option<P>) + Send + Clone, P, R>
     where
@@ -112,34 +112,32 @@ impl FutureThread {
         P: Send,
         R: Send,
     {
-        let sender = self.0.as_ref().unwrap().sender.clone();
         let (mut return_sender, return_receiver) = mpsc::channel(1);
         let closure = move |param: Option<P>| {
             if let Some(param) = param {
                 let res = closure(param);
                 if block_on(return_sender.send(res)).is_err() {
-                    error!(
-                    "BUG: Receiver dropped, error sending response from transform of StreamThread"
-                );
+                    error!("BUG: Receiver dropped, error sending response from transform of StreamThread");
                 }
             } else {
                 return_sender.close_channel();
             }
         };
-        TransformFuture::new(sender, return_receiver, closure)
+        TransformFuture::new(self, return_receiver, closure)
     }
 }
 
 impl Drop for FutureThread {
     fn drop(&mut self) {
-        match self.0.take() {
-            Some(Inner { thread, sender }) => {
-                drop(sender);
-                thread.join().unwrap_or_else(|_| {
-                    error!("BUG: StreamThread's thread unable to join. Possible Thread panic!")
-                });
-            }
-            _ => unreachable!("BUG: StreamThread dropping in unhandled state"),
+        let thread = self
+            .thread
+            .take()
+            .expect("BUG: FutureThread's join handler already dropped");
+        if let Ok(thread) = Arc::try_unwrap(thread) {
+            self.sender.close_channel();
+            thread.join().unwrap_or_else(|_| {
+                error!("BUG: FutureThread's thread unable to join. Possible thread panic!")
+            });
         }
     }
 }
@@ -154,7 +152,7 @@ mod test {
         let fut = async {
             let mut fut_thread = FutureThread::new();
             let increase = |param| 1 + param;
-            let mut increase = fut_thread.with_closure(increase);
+            let mut increase = fut_thread.clone().into_call_future(increase);
             let val = increase.call(4u32).await;
             assert_eq!(val, Ok(5u32));
             let val = increase.call(8u32).await;
@@ -177,7 +175,7 @@ mod test {
         });
         let fut = async {
             let fut_thread = FutureThread::new();
-            let (tx, rx) = fut_thread.transform(|param| param * param).split();
+            let (tx, rx) = fut_thread.into_transform(|param| param * param).split();
             let fut1 = stream.map(Ok).forward(tx);
             let fut2 = rx.collect::<Vec<_>>();
             let (res1, res2) = future::join(fut1, fut2).await;

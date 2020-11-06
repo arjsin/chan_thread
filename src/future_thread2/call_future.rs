@@ -1,38 +1,38 @@
-use super::FutureThreadError;
-use futures::{
-    channel::{mpsc, oneshot},
-    prelude::*,
-};
+use super::{FutureThread, FutureThreadError};
+use futures::{channel::oneshot, prelude::*};
 use std::marker::PhantomData;
 
-pub struct CallFuture<'a, A, P, R>
+pub struct CallFuture<A, P, R>
 where
     A: FnOnce(P, oneshot::Sender<R>) + Send + 'static,
     P: Send + 'static,
     R: Send + 'static,
 {
-    sender: mpsc::Sender<Box<dyn FnOnce() + Send>>,
+    thread: FutureThread,
     closure: A,
-    _phantom: PhantomData<(&'a P, R)>,
+    _phantom: PhantomData<(P, R)>,
 }
 
-impl<'a, A, P, R> CallFuture<'a, A, P, R>
+impl<A, P, R> CallFuture<A, P, R>
 where
     A: FnOnce(P, oneshot::Sender<R>) + Send + Clone + 'static,
     P: Send + 'static,
     R: Send + 'static,
 {
-
-    pub(crate) fn new(sender: mpsc::Sender<Box<dyn FnOnce() + Send>>, closure: A) -> Self {
+    pub(crate) fn new(thread: FutureThread, closure: A) -> Self {
         let _phantom = PhantomData;
-        CallFuture {sender, closure, _phantom}
+        CallFuture {
+            thread,
+            closure,
+            _phantom,
+        }
     }
 
     pub async fn call(&mut self, parameter: P) -> Result<R, FutureThreadError> {
         let (remote_sender, receiver) = oneshot::channel();
         let closure = self.closure.clone();
         let c = || closure(parameter, remote_sender);
-        match self.sender.send(Box::new(c)).await {
+        match self.thread.sender.send(Box::new(c)).await {
             Ok(()) => receiver
                 .await
                 .map_err(|_| FutureThreadError::InternallyCancelled), // TODO: Add strategy to recover thread panics
