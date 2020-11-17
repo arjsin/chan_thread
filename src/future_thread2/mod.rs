@@ -1,7 +1,7 @@
 mod call_future;
 mod transform_future;
 
-pub use call_future::CallFuture;
+pub use call_future::{Callable, CallFuture};
 use futures::{
     channel::{mpsc, oneshot},
     executor::block_on,
@@ -27,6 +27,8 @@ impl From<mpsc::SendError> for FutureThreadError {
         }
     }
 }
+
+pub type FutureThreadResult<T> = Result<T, FutureThreadError>;
 
 #[inline]
 fn work(mut receiver: mpsc::Receiver<Box<dyn FnOnce() + Send>>) {
@@ -61,7 +63,7 @@ impl FutureThread {
         }
     }
 
-    pub async fn spawn<A, R>(&mut self, closure: A) -> Result<R, FutureThreadError>
+    pub async fn spawn<A, R>(&mut self, closure: A) -> FutureThreadResult<R>
     where
         A: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
@@ -152,7 +154,7 @@ mod test {
         let fut = async {
             let mut fut_thread = FutureThread::new();
             let increase = |param| 1 + param;
-            let mut increase = fut_thread.clone().into_call_future(increase);
+            let increase = fut_thread.clone().into_call_future(increase);
             let val = increase.call(4u32).await;
             assert_eq!(val, Ok(5u32));
             let val = increase.call(8u32).await;

@@ -8,7 +8,8 @@ use unblock_poll_fn::unblock_poll_fn;
 
 pub use future_thread::{FutureThread, FutureThreadFuture};
 pub use future_thread2::{
-    CallFuture, FutureThread as FutureThread2, FutureThreadError, TransformFuture,
+    CallFuture, Callable, FutureThread as FutureThread2, FutureThreadError, FutureThreadResult,
+    TransformFuture,
 };
 pub use sink_thread::{SinkThread, SinkThreadError};
 pub use stream_thread::StreamThread;

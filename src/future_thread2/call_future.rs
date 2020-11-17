@@ -1,6 +1,10 @@
-use super::{FutureThread, FutureThreadError};
+use super::{FutureThread, FutureThreadError, FutureThreadResult};
 use futures::{channel::oneshot, prelude::*};
-use std::marker::PhantomData;
+use std::{marker::PhantomData, pin::Pin};
+
+pub trait Callable<P, R> {
+    fn call(&self, parameter: P) -> Pin<Box<dyn Future<Output = FutureThreadResult<R>> + Send>>;
+}
 
 pub struct CallFuture<A, P, R>
 where
@@ -27,16 +31,27 @@ where
             _phantom,
         }
     }
+}
 
-    pub async fn call(&mut self, parameter: P) -> Result<R, FutureThreadError> {
+impl<A, P, R> Callable<P, R> for CallFuture<A, P, R>
+where
+    A: FnOnce(P, oneshot::Sender<R>) + Send + Clone + 'static,
+    P: Send,
+    R: Send,
+{
+    fn call(&self, parameter: P) -> Pin<Box<dyn Future<Output = FutureThreadResult<R>> + Send>> {
         let (remote_sender, receiver) = oneshot::channel();
         let closure = self.closure.clone();
         let c = || closure(parameter, remote_sender);
-        match self.thread.sender.send(Box::new(c)).await {
-            Ok(()) => receiver
-                .await
-                .map_err(|_| FutureThreadError::InternallyCancelled), // TODO: Add strategy to recover thread panics
-            Err(e) => Err(e.into()),
-        }
+        let mut sender = self.thread.sender.clone();
+        let fut = async move {
+            match sender.send(Box::new(c)).await {
+                Ok(()) => receiver
+                    .await
+                    .map_err(|_| FutureThreadError::InternallyCancelled), // TODO: Add strategy to recover thread panics
+                Err(e) => Err(e.into()),
+            }
+        };
+        Box::pin(fut)
     }
 }
